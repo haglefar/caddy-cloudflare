@@ -1,0 +1,49 @@
+name: build caddy-cloudflare
+
+on:
+  push:
+    branches: [main]
+  schedule:
+    - cron: "0 3 * * 1"   # weekly: picks up new Caddy / plugin releases
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Build locally for testing
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          load: true
+          tags: caddy-cf:test
+
+      - name: Check plugin and read version
+        id: v
+        run: |
+          docker run --rm caddy-cf:test caddy list-modules | grep -q '^dns.providers.cloudflare$'
+          ver=$(docker run --rm caddy-cf:test caddy version | awk '{print $1}' | sed 's/^v//')
+          echo "ver=$ver" >> "$GITHUB_OUTPUT"
+          echo "owner=${GITHUB_REPOSITORY_OWNER,,}" >> "$GITHUB_OUTPUT"
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: |
+            ghcr.io/${{ steps.v.outputs.owner }}/caddy-cloudflare:${{ steps.v.outputs.ver }}
+            ghcr.io/${{ steps.v.outputs.owner }}/caddy-cloudflare:2
